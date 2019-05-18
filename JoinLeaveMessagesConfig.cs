@@ -9,8 +9,7 @@ namespace JoinLeaveMessages
         public bool LeaveMessageEnable = true;
         public string JoinMessageColor = "green";
         public string LeaveMessageColor = "green";
-        public bool GroupMessages = false;
-        public bool ExtendedMessages = false;
+        public bool ShowJoinCountry = true;
 
         public void LoadDefaults() { }
     }

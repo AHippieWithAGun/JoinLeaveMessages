@@ -1,14 +1,13 @@
-﻿using Rocket.API;
-using Rocket.API.Collections;
-using Rocket.API.Serialisation;
-using Rocket.Core;
-using Rocket.Core.Logging;
+﻿using Rocket.API.Collections;
+    using Rocket.Core.Logging;
 using Rocket.Core.Plugins;
 using Rocket.Unturned;
 using Rocket.Unturned.Chat;
 using Rocket.Unturned.Player;
 using SDG.Unturned;
-using System.Linq;
+using Steamworks;
+using System.Net;
+using Newtonsoft.Json;
 using Color = UnityEngine.Color;
 
 namespace JoinLeaveMessages
@@ -51,13 +50,8 @@ namespace JoinLeaveMessages
                 {
                     { "connect_message", "{0} connected to the server." },
                     { "disconnect_message", "{0} disconnected from the server." },
-                    { "connect_group_message", "{0}{1} connected to the server." },
-                    { "disconnect_group_message", "{0}{1} disconnected from the server." },
 
-                    { "connect_message_extended", "{0} [{1}] ({2}) connected to the server." },
-                    { "disconnect_message_extended", "{0} [{1}] ({2}) disconnected from the server." },
-                    { "connect_group_message_extended", "{0}{1} [{2}] ({3}) connected to the server." },
-                    { "disconnect_group_message_extended", "{0}{1} [{2}] ({3}) disconnected from the server." }
+                    { "connect_message_country", "{0} has connected from {1}." }
                 };
             }
         }
@@ -95,13 +89,16 @@ namespace JoinLeaveMessages
                     float g;
                     float b;
                     string[] colors = color.Split(',');
-                    return (colors.Length == 3 && float.TryParse(colors[0], out r) && float.TryParse(colors[1], out g) && float.TryParse(colors[2], out b) && r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) ? new Color( r/255, g/255, b/255 ) : Color.green;
+                    return (colors.Length == 3 && float.TryParse(colors[0], out r) && float.TryParse(colors[1], out g) && float.TryParse(colors[2], out b) && r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) ? new Color(r / 255, g / 255, b / 255) : Color.green;
             }
         }
 
         private void Events_OnPlayerConnected(UnturnedPlayer player)
         {
-            Message(player, true);
+            if (Configuration.Instance.ShowJoinCountry)
+                CountryMessage(player);
+            else
+                Message(player, true);
         }
 
         private void Events_OnPlayerDisconnected(UnturnedPlayer player)
@@ -114,46 +111,41 @@ namespace JoinLeaveMessages
 
         private void Message(UnturnedPlayer player, bool join)
         {
-            if (!R.Permissions.HasPermission(player, "jlm.vanish"))
-            {
-                if ((R.Permissions.HasPermission(player, "jlm.group") || player.IsAdmin) && Instance.Configuration.Instance.GroupMessages)
-                {
-                    RocketPermissionsGroup group = R.Permissions.GetGroups(player, false).FirstOrDefault();
-                    if (!Instance.Configuration.Instance.ExtendedMessages)
-                        UnturnedChat.Say(Translate(join ? "connect_group_message" : "disconnect_group_message", group != null ? group.DisplayName + ": " : "", player.CharacterName), join == true ? JoinMessageColor : LeaveMessageColor);
-                    else
-                    {
-                        foreach (SteamPlayer SDGPlayer in Provider.clients)
-                        {
-                            if (SDGPlayer != null)
-                            {
-                                if (R.Permissions.HasPermission(new RocketPlayer(SDGPlayer.playerID.steamID.ToString()), "jlm.extended") || SDGPlayer.isAdmin)
-                                    UnturnedChat.Say(SDGPlayer.playerID.steamID, Translate( join ? "connect_group_message_extended" : "disconnect_group_message_extended", group != null ? group.DisplayName + ": " : "", player.CharacterName, player.SteamName, player.CSteamID.ToString() ), join == true ? JoinMessageColor : LeaveMessageColor);
-                                else
-                                    UnturnedChat.Say(SDGPlayer.playerID.steamID, Translate( join ? "connect_group_message" : "disconnect_group_message", group != null ? group.DisplayName + ": " : "", player.CharacterName ), join == true ? JoinMessageColor : LeaveMessageColor);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    if (!Instance.Configuration.Instance.ExtendedMessages)
-                        UnturnedChat.Say(Translate( join ? "connect_message" : "disconnect_message", player.CharacterName ), join == true ? JoinMessageColor : LeaveMessageColor);
-                    else
-                    {
-                        foreach (SteamPlayer SDGPlayer in Provider.clients)
-                        {
-                            if (SDGPlayer != null)
-                            {
-                                if (R.Permissions.HasPermission(new RocketPlayer(SDGPlayer.playerID.steamID.ToString()), "jlm.extended") || SDGPlayer.isAdmin)
-                                    UnturnedChat.Say(SDGPlayer.playerID.steamID, Translate( join ? "connect_message_extended" : "disconnect_message_extended", player.CharacterName, player.SteamName, player.CSteamID.ToString() ), join == true ? JoinMessageColor : LeaveMessageColor);
-                                else
-                                    UnturnedChat.Say(SDGPlayer.playerID.steamID, Translate( join ? "connect_message" : "disconnect_message", player.CharacterName ), join == true ? JoinMessageColor : LeaveMessageColor);
-                            }
-                        }
-                    }
-                }
-            }
+            UnturnedChat.Say(Translate(join ? "connect_message" : "disconnect_message", player.CharacterName), join == true ? JoinMessageColor : LeaveMessageColor);
+        }
+
+        private void CountryMessage(UnturnedPlayer player)
+        {
+            SteamGameServerNetworking.GetP2PSessionState(player.CSteamID, out P2PSessionState_t state);
+            string adress = Parser.getIPFromUInt32(state.m_nRemoteIP);
+
+            string response = new WebClient().DownloadString("http://ip-api.com/json/" + adress);
+
+            var rootObject = JsonConvert.DeserializeObject<RootObject>(response);
+
+            if (!rootObject.status.Equals("success"))
+                Message(player, true);
+            else
+                UnturnedChat.Say(Translate("connect_message_country", player.CharacterName, rootObject.country), JoinMessageColor);
         }
     }
+
+    public class RootObject
+    {
+        public string _as { get; set; }
+        public string city { get; set; }
+        public string country { get; set; }
+        public string countryCode { get; set; }
+        public string isp { get; set; }
+        public float lat { get; set; }
+        public float lon { get; set; }
+        public string org { get; set; }
+        public string query { get; set; }
+        public string region { get; set; }
+        public string regionName { get; set; }
+        public string status { get; set; }
+        public string timezone { get; set; }
+        public string zip { get; set; }
+    }
+
 }
